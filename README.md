@@ -6,6 +6,11 @@ This project aims to provide a scalable ETL (Extract, Transform, Load) pipeline 
 
 The pipeline is built using a combination of popular technologies, which are mentioned below. 
 
+## Architecture
+
+![alt text](https://github.com/Smarty619/Spotify-ETL-Pipeline/blob/main/Spotify-Etl1.png?raw=true)
+
+
 ## Technologies Used
 
 * Python
