@@ -1,0 +1,154 @@
+from dotenv import load_dotenv
+import os
+import base64
+from requests import post,get
+import json
+from datetime import timedelta,datetime
+import pandas as pd
+import boto3
+from io import StringIO
+
+
+
+def etl():
+    load_dotenv()
+
+    client_id=os.getenv("CLIENT_ID")
+    client_secret=os.getenv("CLIENT_SECRET")
+
+    def get_token():
+        auth_str= client_id + ':' + client_secret
+        auth_byt= auth_str.encode('utf-8')
+        auth_base64=str(base64.b64encode(auth_byt),"utf-8")
+
+        url='https://accounts.spotify.com/api/token'
+        headers={
+            "Authorization": "Basic " + auth_base64,
+            "Content-Type": "application/x-www-form-urlencoded"
+
+        }
+        data= {"grant_type":"client_credentials"}
+        result=post(url,headers=headers,data=data)
+        json_res=json.loads(result.content)
+        token=json_res["access_token"]
+        return token
+
+    def get_auth(token):
+        return{"Authorization": "Bearer " + token}
+
+    def get_data_by_artist(token,artist_name):
+        url="https://api.spotify.com/v1/search"
+        headers=get_auth(token)
+        query=f"?q={artist_name}&type=track&market=IN&limit=20"
+        query_url=url+query
+        result=get(query_url,headers=headers)
+        json_res=json.loads(result.content)['tracks']['items']
+        return json_res 
+
+
+    token=get_token()
+    data=get_data_by_artist(token,"Anirudh Ravichandran")
+
+    def ans(milliseconds):
+        t=timedelta(milliseconds=milliseconds)
+        minutes = t.seconds // 60
+        seconds = t.seconds % 60
+        return f"{minutes}m:{seconds}s"
+
+    def date_format(data):    
+        dates=datetime.strptime(data,"%Y-%m-%d")
+        return f"{dates.day}-{dates.month}-{dates.year}"
+        
+
+
+
+    Artist_details=[]
+    for Artist in data:
+        Artist_id=Artist['artists'][0]['id']
+        Artist_name=Artist['artists'][0]['name']
+        Artist_url=Artist['artists'][0]['external_urls']
+        
+        Artist_el={
+            'Artist_id':Artist_id,
+            'Artist_name':Artist_name,
+            'Artist_url':Artist_url
+        }
+
+        Artist_details.append(Artist_el)
+
+    Artist_data=pd.DataFrame.from_dict(Artist_details)
+
+    Album_details=[]
+    for Album in data:
+
+        Album_name=Album['name']
+        Album_id=Album['id']
+        Album_url=Album['external_urls']
+        Release_date=Album['album']['release_date']
+        Total_tracks=Album['album']['total_tracks']
+
+        album_el={    
+        "Album_id":Album_id,
+        "Album_name":Album_name,    
+        'Release_date':date_format(Release_date),
+        'Total_tracks':Total_tracks,
+        'Album_url':Album_url
+        }
+
+        Album_details.append(album_el)
+
+    Album_data=pd.DataFrame.from_dict(Album_details)
+    
+    Track_details=[]
+
+    for track in data:
+
+        Album_id=track['id']
+        Artist_id=track['artists'][0]['id']
+        track_id=track['album']['id']
+        track_name=track['album']['name']
+        Duration=ans(track['duration_ms'])
+        Album_Popularity=track['popularity']
+        Url=track['album']['external_urls']
+        
+        track_el={
+            'Album_id':Album_id,
+            'Artist_id':Artist_id,
+            'Track_id':track_id,
+            "Track_name":track_name,
+            'Duration':Duration,
+            'Popularity':Album_Popularity,
+            'Track_link':Url
+        }
+        Track_details.append(track_el)
+        
+
+    Track_data=pd.DataFrame.from_dict(Track_details)
+
+    def df_to_s3(df, bucket, key):
+
+        s3=boto3.resource('s3',
+                        aws_access_key_id=os.getenv("access_key"),
+                        aws_secret_access_key=os.getenv("secret_key")
+                        )
+        
+    # Create a CSV string from the DataFrame
+        
+        csv_buffer = StringIO()
+        df.to_csv(csv_buffer, index=False)
+
+    # Put the CSV string to S3
+        
+        Body=csv_buffer.getvalue()
+        Bucket=bucket
+        Key=key
+        s3.Object(Bucket, Key).put(Body=Body)
+        print(f'Successfully loaded DataFrame into {bucket}/{key}')
+
+    df_to_s3(Artist_data,"spotify-etl1","snowflake-etl/Artist_Data.csv")
+    df_to_s3(Album_data,"spotify-etl1","snowflake-etl/Albums_data.csv")
+    df_to_s3(Track_data,"spotify-etl1","snowflake-etl/Track_data.csv")
+
+
+
+
